@@ -1,0 +1,1052 @@
+import React, { useState, useEffect, useRef } from 'react';
+import { initializeApp } from 'firebase/app';
+import { 
+  getFirestore, 
+  doc, 
+  setDoc, 
+  onSnapshot
+} from 'firebase/firestore';
+import { 
+  getAuth, 
+  signInWithCustomToken, 
+  signInAnonymously, 
+  onAuthStateChanged 
+} from 'firebase/auth';
+import { 
+  Plus, 
+  Trash2, 
+  Layout, 
+  Database, 
+  MapPin, 
+  Package, 
+  Factory,
+  User,
+  Loader2,
+  CheckCircle2,
+  AlertCircle,
+  Pickaxe,
+  Settings,
+  X,
+  Copy,
+  Download,
+  Hammer,
+  Search,
+  FileText,
+  Shield,
+  BookOpen,
+  ExternalLink
+} from 'lucide-react';
+
+// --- Firebase Configuration ---
+const firebaseConfig = JSON.parse(__firebase_config);
+const app = initializeApp(firebaseConfig);
+const auth = getAuth(app);
+const db = getFirestore(app);
+
+const appId = typeof __app_id !== 'undefined' ? __app_id : 'foxhole-logistics-v1';
+
+// --- Constants & Logic Mapping ---
+const PLAYER_OPTIONS = ["KingBigD", "Meta", "IndyGeek"];
+
+const MATERIAL_OPTIONS = [
+  "Construction Materials", "Processed Construction Materials", "Steel Construction Materials",
+  "Assembly Materials I", "Assembly Materials II", "Assembly Materials III",
+  "Assembly Materials IV", "Assembly Materials V", "Coke", "Heavy Explosive Powder",
+  "Petrol", "Heavy Oil", "Enriched Carbon", "Sulfur", "Coal", "Scrap"
+];
+
+const FACILITY_OPTIONS = [
+  "Materials Factory", "Coal Refinery", "Oil Refinery", "Metalworks Factory",
+  "Ammunition Factory", "Small Assembly Station", "Large Assembly Station",
+  "Power Station", "Water Pump", "Fuel Silo", "Maintenance Tunnel", "Resource Container"
+];
+
+const MINE_TYPES = [
+  "Scrap Mine", "Component Mine", "Sulfur Mine", "Oil Well", "Coal Field"
+];
+
+const FUEL_OPTIONS = [
+  "Diesel", "Petrol", "Heavy Oil", "Facility Power"
+];
+
+const MATERIAL_TO_FACILITY_MAP = {
+  "Construction Materials": ["Materials Factory"],
+  "Processed Construction Materials": ["Metalworks Factory"],
+  "Steel Construction Materials": ["Metalworks Factory"],
+  "Assembly Materials I": ["Materials Factory"],
+  "Assembly Materials II": ["Materials Factory"],
+  "Assembly Materials III": ["Metalworks Factory"],
+  "Assembly Materials IV": ["Metalworks Factory"],
+  "Assembly Materials V": ["Metalworks Factory"],
+  "Coke": ["Coal Refinery"],
+  "Heavy Explosive Powder": ["Ammunition Factory"],
+  "Petrol": ["Oil Refinery"],
+  "Heavy Oil": ["Oil Refinery"],
+  "Enriched Carbon": ["Coal Refinery"],
+  "Sulfur": ["Coal Refinery", "Oil Refinery"],
+  "Coal": ["Resource Container"],
+  "Scrap": ["Resource Container"]
+};
+
+// ============================================================================
+// WIKI DATA IMPORTER
+// ============================================================================
+const RAW_WIKI_DATA = `Output|Source|Category|In1|In1Amt|In2|In2Amt|OutAmt|SecOut|SecOutAmt|Time
+.44|Factory|Small Arms|Basic Materials|40|||1|||40
+“Dawn” Ve.II|Infantry Kit Factory|Special-Issue Firearms Assembly|Processed Construction Materials|3|Assembly Materials II|5|1|||75
+“Dusk” ce.III|Factory|Small Arms|Refined Materials|15|||1|||80
+“Lionclaw” mc.VIII|Factory|Small Arms|Basic Materials|120|||1|||80
+“Molten Wind” v.II Ammo|Factory|Utility|Basic Materials|160|Heavy Explosive Powder|20|1|||100
+“Molten Wind” v.II Flame Torch|Factory|Heavy Arms|Basic Materials|185|Refined Materials|25|1|||50
+“Quickhatch” Rt.I|Infantry Kit Factory|Special-Issue Firearms Assembly|Processed Construction Materials|10|Assembly Materials I|5|1|||120
+“The Pitch Gun” mc.V|Factory|Small Arms|Basic Materials|80|||1|||80
+“Typhon” ra.XII|Ammunition Factory|Tripod Factory|Construction Materials|3|||1|||25
+“Typhon” ra.XII|Factory|Heavy Arms|Basic Materials|100|Refined Materials|5|1|||125
+00MS “Stinger”|Small Assembly Station|None|Construction Materials|5|||1|||180
+03MM “Caster”|Garage|None|Basic Materials|85|||1|||
+12.7mm|Factory|Small Arms|Basic Materials|100|||1|||70
+120-68 “Koronides” Field Gun|Garage|None|Refined Materials|50|||1|||25
+120mm|Ammunition Factory|Large Shell Factory|Construction Materials|2|Heavy Explosive Powder|2|1|||25
+120mm|Factory|Heavy Ammunition|Basic Materials|120|Heavy Explosive Powder|10|1|||55
+14.5mm|Factory|Heavy Arms|Basic Materials|100|||1|||100
+14.5mm|Infantry Kit Factory|Small Arms Workshop|Construction Materials|110|||10|||9000
+150mm|Ammunition Factory|Large Shell Factory|Construction Materials|3|Heavy Explosive Powder|12|1|||40
+150mm|Factory|Heavy Ammunition|Basic Materials|120|Heavy Explosive Powder|60|1|||65
+20mm|Ammunition Factory|None|Construction Materials|4|||1|||10
+20mm|Factory|Heavy Ammunition|Basic Materials|120|||1|||55
+228 Satterley Heavy Storm Rifle|Infantry Kit Factory|Special-Issue Firearms Assembly|Processed Construction Materials|3|Assembly Materials II|5|1|||75
+250mm “Fury” Shell|Ammunition Factory|None|Construction Materials|15|Heavy Explosive Powder|24|1|||30
+250mm “Fury” Shell|Factory|Heavy Ammunition|Basic Materials|250|Heavy Explosive Powder|200|1|||250
+250mm “Purity” Shell|Ammunition Factory|None|Construction Materials|5|Heavy Explosive Powder|24|1|||30
+250mm “Purity” Shell|Factory|Heavy Ammunition|Basic Materials|120|Heavy Explosive Powder|100|1|||150
+30-250 “Tisiphone” Field Cannon|Garage|None|Refined Materials|35|||1|||
+300mm|Ammunition Factory|Large Shell Factory|Unstable Substances|2|Assembly Materials IV|10|1|||120
+30mm|Factory|Heavy Arms|Basic Materials|80|Explosive Powder|40|1|||100
+30mm|Infantry Kit Factory|Heavy Munitions Foundry|Construction Materials|45|Explosive Powder|220|10|||9000
+3C-High Explosive Rocket|Ammunition Factory|Rocket Battery Workshop|Construction Materials|2|Heavy Explosive Powder|4|1|||25
+40-250 “Alekto” Heavy Cannon|Small Assembly Station|Weapons Platform|Steel Construction Materials|10|Assembly Materials II|20|1|||420
+40-45 “Smelter”|Small Assembly Station|Field Station|Processed Construction Materials|5|Assembly Materials IV|5|1|||300
+40mm|Factory|Heavy Ammunition|Basic Materials|160|Explosive Powder|240|1|||200
+40mm|Infantry Kit Factory|Heavy Munitions Foundry|Construction Materials|175|Explosive Powder|1320|10|||18000
+4C-Fire Rocket|Ammunition Factory|Rocket Battery Workshop|Construction Materials|2|Heavy Explosive Powder|4|1|||25
+50-500 “Thunderbolt” Cannon|Construction Yard|None|Refined Materials|195|||1|||
+68A-4 Ronan Fathomer|Shipyard|None|Basic Materials|250|||1|||125
+68mm|Factory|Heavy Ammunition|Basic Materials|120|Explosive Powder|240|1|||200
+68mm|Infantry Kit Factory|Heavy Munitions Foundry|Construction Materials|130|Explosive Powder|1320|10|||18000
+7.62mm|Factory|Small Arms|Basic Materials|80|||1|||50
+7.92mm|Factory|Small Arms|Basic Materials|120|||1|||60
+74b-1 Ronan Gunship|Shipyard|None|Refined Materials|140|||1|||
+75mm|Ammunition Factory|Large Shell Factory|Construction Materials|2|Heavy Explosive Powder|8|1|||60
+81f-f Ronan Blackguard|Shipyard|None|Refined Materials|100|||1|||
+85K-a “Spatha”|Small Assembly Station|Tank Factory|Processed Construction Materials|8|Assembly Materials I|10|1|||420
+85K-b “Falchion”|Garage|None|Refined Materials|135|||1|||
+85V-g “Talos”|Small Assembly Station|Weapons Platform|Processed Construction Materials|15|Assembly Materials I|10|1|||600
+86K-a “Bardiche”|Garage|None|Refined Materials|165|||1|||
+86K-c “Ranseur”|Small Assembly Station|Tank Factory|Processed Construction Materials|10|Assembly Materials II|10|1|||420
+8mm|Factory|Small Arms|Basic Materials|40|||1|||20
+90T-v “Nemesis”|Garage|None|Refined Materials|150|||1|||
+912 Shrike Rounds|Ammunition Factory|Large Shell Factory|Heavy Explosive Powder|12|Processed Construction Materials|1|1|||90
+94.5mm|Ammunition Factory|Large Shell Factory|Construction Materials|2|Heavy Explosive Powder|8|1|||60
+945g “Stygian Bolt”|Small Assembly Station|Weapons Platform|Steel Construction Materials|15|Assembly Materials II|20|1|||420
+950-70b Anti-Aircraft Shell|Ammunition Factory|Large Shell Factory|Heavy Explosive Powder|3|Construction Materials|2|1|||25
+950-70b Anti-Aircraft Shell|Factory|Heavy Ammunition|Basic Materials|100|Heavy Explosive Powder|15|1|||65
+9mm|Factory|Small Arms|Basic Materials|80|||1|||50
+A0E-9 Rocket Body|Small Assembly Station|Advanced Structure Manufactory|Steel Construction Materials|20|Thermal Shielding|75|1|||86400
+A0E-9 Rocket Booster|Small Assembly Station|Advanced Structure Manufactory|Steel Construction Materials|20|Thermal Shielding|75|1|||86400
+A0E-9 Rocket Warhead|Small Assembly Station|Advanced Structure Manufactory|Rare Alloys|75|Unstable Substances|165|1|||86400
+A3 Harpa Fragmentation Grenade|Factory|Small Arms|Basic Materials|100|Explosive Powder|40|1|||100
+A51 Venti “Daedalus”|Aircraft Hangar|None|Refined Materials|80|||1|||
+AA-2 Battering Ram|Garage|None|Refined Materials|20|||1|||
+Aalto Storm Rifle 24|Factory|Small Arms|Refined Materials|15|||1|||80
+AB-11 “Doru”|Small Assembly Station|Field Station|Processed Construction Materials|5|Assembly Materials III|3|1|||300
+AB-8 “Acheron”|Garage|None|Refined Materials|20|||1|||
+Abisme AT-99|Ammunition Factory|None|Heavy Explosive Powder|2|Construction Materials|2|1|||25
+AC-b “Trident”|Dry Dock|None|Naval Hull Segments|15|Naval Shell Plating|15|1|||21600
+Aegis Steelbreaker K5a|Large Assembly Station|Train Assembly|Steel Construction Materials|30|Assembly Materials I|30|1|||1800
+Aircraft Radar Parts|Small Assembly Station|Advanced Structure Manufactory|Processed Construction Materials|50|Rare Alloys|3|1|||1500
+Alligator Charge|Factory|Utility|Basic Materials|100|Explosive Powder|80|1|||100
+Aluminum Alloy|Refinery|None|Aluminum|1|||1|||0.24
+Anti-Tank Sticky Bomb|Factory|Heavy Arms|Basic Materials|50|Explosive Powder|100|1|||75
+Anti-Tank Sticky Bomb|Infantry Kit Factory|Small Arms Workshop|Explosive Powder|550|Construction Materials|55|10|||6900
+AP⧸RPG|Factory|Heavy Arms|Basic Materials|60|Explosive Powder|150|1|||100
+AP⧸RPG|Infantry Kit Factory|Heavy Munitions Foundry|Construction Materials|65|Explosive Powder|825|10|||9000
+ARC⧸RPG|Factory|Heavy Arms|Basic Materials|60|Explosive Powder|150|1|||100
+ARC⧸RPG|Infantry Kit Factory|Heavy Munitions Foundry|Construction Materials|65|Explosive Powder|825|10|||9000
+Argenti r.II Rifle|Factory|Small Arms|Basic Materials|100|||1|||70
+Armoured Fighting Tractor|Garage|None|Relic Materials|80|||1|||
+Assembly Materials I|Materials Factory|Forge|Salvage|15|Coke|75|1|||60
+Assembly Materials II|Materials Factory|Forge|Salvage|15|Petrol|50|1|||60
+Assembly Materials III|Metalworks Factory|Blast Furnace|Construction Materials|3|Sulfur|20|1|||120
+Assembly Materials IV|Metalworks Factory|Blast Furnace|Processed Construction Materials|1|Heavy Oil|66|1|||120
+Assembly Materials V|Metalworks Factory|Engineering Station|Steel Construction Materials|3|Coke|245|1|||120
+AU-A150 Taurine Rigger|Small Assembly Station|Field Station|Processed Construction Materials|40|||1|||600
+Auster's Harness|Infantry Kit Factory|Special-Issue Firearms Assembly|Processed Construction Materials|10|||1|||120
+Aviator's Raiment|Infantry Kit Factory|Special-Issue Firearms Assembly|Rare Materials|1|||1|||120
+B2 Varsi Anti-Tank Grenade|Factory|Heavy Arms|Basic Materials|95|Explosive Powder|125|1|||80
+B2 Varsi Anti-Tank Grenade|Infantry Kit Factory|Heavy Munitions Foundry|Construction Materials|105|Explosive Powder|685|10|||7200
+Balfour Falconer 250mm|Garage|None|Refined Materials|35|||1|||
+Balfour Rampart 68mm|Small Assembly Station|Field Station|Processed Construction Materials|5|Assembly Materials IV|5|1|||300
+Balfour Stockade 75mm|Small Assembly Station|Weapons Platform|Steel Construction Materials|15|Assembly Materials II|20|1|||420
+Balfour Wolfhound 40mm|Garage|None|Refined Materials|20|||1|||
+Bandages|Factory|Medical|Basic Materials|80|||1|||40
+Bane 45|Factory|Heavy Arms|Basic Materials|150|Refined Materials|40|1|||125
+Barbed Wire|Factory|Utility|Basic Materials|15|||1|||15
+Barbed Wire|Materials Factory|Assembly Bay|Salvage|25|||5|Construction Materials|1|25
+Basic Materials|Refinery|None|Salvage|2|||1|||0.48
+Bellweather by VAC|Shipyard|None|Basic Materials|150|||1|||
+BF5 White Ash Flask Grenade|Factory|Heavy Arms|Basic Materials|100|Explosive Powder|80|1|||75
+BF5 White Ash Flask Grenade|Infantry Kit Factory|Small Arms Workshop|Explosive Powder|440|Construction Materials|110|10|||6900
+Binoculars|Factory|Utility|Basic Materials|75|||1|||50
+Blacksteele|Dry Dock|None|Naval Hull Segments|12|Naval Shell Plating|12|1|||21600
+Blakerow 871|Factory|Small Arms|Basic Materials|140|||1|||80
+Blood Plasma|Factory|Medical|Basic Materials|80|||1|||40
+BMS - Aquatipper|Shipyard|None|Basic Materials|150|||1|||
+BMS - Bluefin|Dry Dock|None|Naval Hull Segments|25|Naval Shell Plating|25|1|||28800
+BMS - Bowhead|Dry Dock|None|Naval Hull Segments|8|Naval Shell Plating|15|1|||14400
+BMS - Class 2 Mobile Auto-Crane|Garage|None|Basic Materials|125|||1|||
+BMS - Class 2 Mobile Auto-Crane|Home Base|None|Basic Materials|125|||1|||
+BMS - Fabricator|Small Assembly Station|Field Station|Processed Construction Materials|10|||1|||900
+BMS - Grouper|Beach|None|Basic Materials|60|||1|||
+BMS - Ironship|Shipyard|None|Basic Materials|500|||1|||100
+BMS - Longhook|Dry Dock|None|Naval Hull Segments|8|Naval Shell Plating|15|1|||14400
+BMS - Overseer Sky-Hauler|Crane Railway Track|None|Processed Construction Materials|250|||1|||
+BMS - Packmule Flatbed|Garage|None|Refined Materials|30|||1|||
+BMS - Scrap Hauler|Small Assembly Station|Field Station|Processed Construction Materials|90|Assembly Materials IV|25|1|||900
+BMS - Universal Assembly Rig|Garage|None|Basic Materials|100|||1|||
+BMS - Universal Assembly Rig|Home Base|None|Basic Materials|100|||1|||
+BMS Black Bolt|Large Assembly Station|None|Processed Construction Materials|200|Assembly Materials I|60|1|||21600
+BMS Bloodtender|Large Assembly Station|Train Assembly|Steel Construction Materials|60|Assembly Materials III|45|1|||129600
+BMS Holdout|Large Assembly Station|None|Processed Construction Materials|20|Assembly Materials II|15|1|||1800
+BMS Linerunner|Small Assembly Station|None|Construction Materials|35|Assembly Materials I|15|1|||300
+BMS Longrider|Large Assembly Station|None|Processed Construction Materials|20|Assembly Materials II|15|1|||1800
+BMS Mineseeker|Small Assembly Station|None|Construction Materials|125|Assembly Materials I|10|1|||900
+BMS Railtruck|Small Assembly Station|None|Construction Materials|35|Assembly Materials I|15|1|||300
+BMS Roadhouse|Large Assembly Station|None|Processed Construction Materials|20|Assembly Materials II|15|1|||1800
+BMS Rockhold|Large Assembly Station|None|Processed Construction Materials|20|Assembly Materials II|15|1|||1800
+BMS Stowheel|Small Assembly Station|None|Construction Materials|35|Assembly Materials I|5|1|||300
+BMS Tinderbox|Small Assembly Station|None|Construction Materials|35|Assembly Materials I|5|1|||300
+Bomastone Grenade|Factory|Small Arms|Basic Materials|100|Explosive Powder|40|1|||100
+Bonesaw MK.3|Factory|Heavy Arms|Basic Materials|100|Refined Materials|25|1|||50
+Booker Greyhound Model 910|Infantry Kit Factory|Special-Issue Firearms Assembly|Processed Construction Materials|3|Assembly Materials II|5|1|||75
+Booker Storm Rifle Model 838|Factory|Small Arms|Refined Materials|15|||1|||80
+Buckhorn CCQ-18|Factory|Utility|Basic Materials|40|||1|||30
+Buckshot|Factory|Small Arms|Basic Materials|80|||1|||50
+Callahan|Dry Dock|None|Naval Hull Segments|20|Naval Shell Plating|20|1|||36000
+Caoivish Parka|Factory|Uniforms|Basic Materials|100|||1|||90
+Caoivish Parka|Infantry Kit Factory|None|Construction Materials|110|||10|||8100
+Carnyx Anti-Tank Rocket Launcher|Factory|Heavy Arms|Basic Materials|125|Refined Materials|15|1|||75
+Cascadier 873|Factory|Small Arms|Basic Materials|60|||1|||30
+Catara mo.II|Factory|Small Arms|Refined Materials|15|||1|||80
+Catena rt.IV Auto-Rifle|Factory|Small Arms|Basic Materials|120|||1|||90
+Clancy Cinder M3|Factory|Small Arms|Basic Materials|130|||1|||90
+Clancy-Raca M4|Factory|Small Arms|Basic Materials|250|Refined Materials|25|1|||250
+Cloudrunner's Vesture|Infantry Kit Factory|Special-Issue Firearms Assembly|Processed Construction Materials|10|||1|||120
+Cnute Cliffwrest|Small Assembly Station|Field Station|Processed Construction Materials|40|||1|||600
+Coal|Stationary Harvester (Coal)|Excavator|Petrol|2|||15|||18
+Coal|Stationary Harvester (Coal)|None|Petrol|1|||50|||18
+Coke|Coal Refinery|Advanced Coal Liquefier|Coal|300|Water|100|260|Heavy Oil|60|405
+Coke|Coal Refinery|Coke Furnace|Coal|200|||165|Sulfur|15|270
+Coke|Coal Refinery|None|Coal|200|||180|||270
+Collins Cannon 68mm|Garage|None|Refined Materials|20|||1|||
+Colonial Aircraft Engine (Large)|Aircraft Maintenance Factory|Strategic Maintenance Hangar|Processed Construction Materials|5|Assembly Materials IV|5|1|||300
+Colonial Aircraft Engine (Large)|Aircraft Maintenance Factory|Strategic Maintenance Hangar|Processed Construction Materials|95|Assembly Materials IV|25|1|||1200
+Colonial Aircraft Engine (Small)|Aircraft Maintenance Factory|None|Processed Construction Materials|1|Assembly Materials IV|1|1|||300
+Colonial Aircraft Engine (Small)|Aircraft Maintenance Factory|None|Processed Construction Materials|95|Assembly Materials IV|25|1|||1200
+Colonial Aircraft Mechanical Parts (Large)|Aircraft Maintenance Factory|Strategic Maintenance Hangar|Processed Construction Materials|5|Assembly Materials III|5|1|||300
+Colonial Aircraft Mechanical Parts (Large)|Aircraft Maintenance Factory|Strategic Maintenance Hangar|Processed Construction Materials|35|Assembly Materials III|25|1|||1200
+Colonial Aircraft Mechanical Parts (Small)|Aircraft Maintenance Factory|None|Processed Construction Materials|1|Assembly Materials III|1|1|||300
+Colonial Aircraft Mechanical Parts (Small)|Aircraft Maintenance Factory|None|Processed Construction Materials|35|Assembly Materials III|25|1|||1200
+Cometa T2-9|Factory|Small Arms|Basic Materials|60|||1|||50
+Components|Component Mine|None|Diesel|1|||9|||30
+Components|Component Mine|None|Petrol|1|||27|||30
+Components|Metalworks Factory|Recycler|Damaged Components|75|||5|||25
+Components|Stationary Harvester (Components)|None|Heavy Oil|4|||6|||12
+Concrete Materials|Coal Refinery|Advanced Coal Liquefier|Coal|300|Water|100|1|Sulfur|15|270
+Concrete Materials|Coal Refinery|Coal Liquefier|Coal|300|Water|50|1|Sulfur|10|270
+Concrete Materials|Concrete Mixer|None|Components|20|||1|||20
+Concrete Mixer|Construction Yard|None|Refined Materials|75|||1|||
+Conqueror|Dry Dock|None|Naval Hull Segments|12|Naval Shell Plating|12|1|||21600
+Construction Equipment|Construction Yard|None|Refined Materials|50|||1|||
+Construction Materials|Materials Factory|Metal Press|Salvage|15|Petrol|25|3|||25
+Construction Materials|Materials Factory|None|Salvage|10|||1|||25
+Construction Materials|Materials Factory|Smelter|Salvage|15|Coke|25|3|||25
+Construction Parts|Small Assembly Station|Advanced Structure Manufactory|Processed Construction Materials|250|Assembly Materials I|225|1|||300
+Copper Alloy|Refinery|None|Copper|1|||1|||0.24
+Cremari Mortar|Factory|Heavy Arms|Basic Materials|100|Refined Materials|25|1|||50
+Crow's Foot Mine|Ammunition Factory|None|Explosive Powder|2|Construction Materials|2|1|||25
+Cullen Predator Mk. III|Large Assembly Station|Heavy Tank Assembly|Steel Construction Materials|275|Assembly Materials III|105|1|||172800
+Cutler Foebreaker|Ammunition Factory|Tripod Factory|Construction Materials|3|||1|||25
+Cutler Foebreaker|Factory|Heavy Arms|Basic Materials|100|Refined Materials|5|1|||250
+Cutler Launcher 4|Factory|Heavy Arms|Basic Materials|100|Refined Materials|35|1|||50
+DAE 1b-2 “Serra”|Construction Yard|None|Basic Materials|100|||1|||
+DAE 1o-3 “Polybolos”|Construction Yard|None|Basic Materials|125|||1|||
+DAE 2a-1 “Ruptura”|Small Assembly Station|Tank Factory|Processed Construction Materials|135|Assembly Materials I|10|1|||600
+DAE 3b-2 “Hades' Net”|Small Assembly Station|Battery Line|Processed Construction Materials|20|Assembly Materials II|15|1|||600
+DAE 5b “Zeal”|Construction Yard|None|Refined Materials|175|||1|||
+DAE 5b “Zeal”|Small Assembly Station|Battery Line|Processed Construction Materials|30|Assembly Materials I|10|1|||600
+Damaged Components|Stationary Harvester (Components)|Excavator|Heavy Oil|3|||18|||12
+Das Krokodil by VAC|Shipyard|None|Basic Materials|100|||1|||
+Daucus isg.III|Ammunition Factory|Tripod Factory|Construction Materials|3|||1|||25
+Daucus isg.III|Factory|Heavy Arms|Basic Materials|100|Refined Materials|5|1|||125
+Devitt Ironhide Mk. IV|Small Assembly Station|Tank Factory|Processed Construction Materials|8|Assembly Materials II|20|1|||300
+Devitt Mk. III|Garage|None|Refined Materials|120|||1|||
+Devitt-Caine Mk. IV MMR|Small Assembly Station|Tank Factory|Processed Construction Materials|3|Assembly Materials I|20|1|||300
+Diesel|Refinery|None|Salvage|10|||1|||12
+Drummond 100a|Garage|None|Refined Materials|10|||1|||
+Drummond Loscann 55c|Small Assembly Station|Motor Pool|Construction Materials|3|Assembly Materials II|5|1|||180
+Drummond Spitfire 100d|Small Assembly Station|Motor Pool|Construction Materials|3|Assembly Materials II|10|1|||180
+Duncan's Coin 14.5mm|Small Assembly Station|Motor Pool|Construction Materials|30|Assembly Materials II|20|1|||600
+Dunne Caravaner 2f|Garage|None|Basic Materials|100|||1|||
+Dunne Dousing Engine 3r|Small Assembly Station|None|Construction Materials|15|Assembly Materials II|5|1|||300
+Dunne Fuelrunner 2d|Garage|None|Basic Materials|100|||1|||
+Dunne Landrunner 12c|Small Assembly Station|None|Construction Materials|10|||1|||300
+Dunne Leatherback 2a|Small Assembly Station|None|Construction Materials|10|||1|||300
+Dunne Loadlugger 3c|Garage|None|Basic Materials|120|||1|||
+Dunne Responder 3e|Garage|None|Basic Materials|150|||1|||
+Dunne Transport|Garage|None|Basic Materials|100|||1|||
+E680-S Rudder Lock|Ammunition Factory|None|Construction Materials|1|Heavy Explosive Powder|8|1|||90
+E681-B Hullbreaker Mine|Ammunition Factory|None|Construction Materials|8|||1|||25
+E681-B Hullbreaker Mine|Factory|Heavy Ammunition|Basic Materials|125|Explosive Powder|35|1|||125
+Eleos Infantry Dagger|Factory|Utility|Basic Materials|200|||1|||100
+Enriched Oil|Offshore Platform|None|Coal|100|||1|||90
+Enriched Oil|Oil Refinery|Petrochemical Plant|Sulfur|60|Heavy Oil|30|30|||200
+Explosive Powder|Refinery|None|Salvage|5|||1|||9.375
+Fabri Rucksack|Factory|Uniforms|Basic Materials|100|||1|||90
+Fabri Rucksack|Infantry Kit Factory|None|Construction Materials|110|||10|||8100
+Facility Power|Diesel Power Plant|Coal Power Plant|Coal|60|||5|||90
+Facility Power|Diesel Power Plant|None|Diesel|25|||5|||45
+Facility Power|Diesel Power Plant|Petrol Power Plant|Petrol|50|||12|||90
+Facility Power|Power Station|None|Coal|30|Water|1|10|||90
+Facility Power|Power Station|None|Oil|50|||10|||90
+Facility Power|Power Station|Sulfuric Reactor|Coke|30|Water|1|16|Sulfur|5|120
+Facility Power|Power Station|Sulfuric Reactor|Heavy Oil|50|||16|Sulfur|5|120
+Falias Raiding Club|Factory|Utility|Basic Materials|200|||1|||100
+Fiddler Submachine Gun Model 868|Factory|Small Arms|Basic Materials|120|||1|||80
+First Aid Kit|Factory|Medical|Basic Materials|60|||1|||35
+Flame Ammo|Ammunition Factory|None|Construction Materials|1|Heavy Explosive Powder|4|1|||25
+Flare Mortar Shell|Factory|Heavy Arms|Basic Materials|60|Explosive Powder|15|1|||100
+Flare Mortar Shell|Infantry Kit Factory|Small Arms Workshop|Explosive Powder|80|Construction Materials|65|10|||9000
+Flood Juggernaut Mk. VII|Large Assembly Station|Heavy Tank Assembly|Steel Construction Materials|40|Assembly Materials III|65|1|||79200
+Flood Mk. I|Large Assembly Station|Heavy Tank Assembly|Steel Construction Materials|50|Assembly Materials III|30|1|||64800
+Flood Mk. IX Stain|Large Assembly Station|Heavy Tank Assembly|Steel Construction Materials|150|Assembly Materials III|65|1|||86400
+Fuscina pi.I|Factory|Small Arms|Basic Materials|140|||1|||80
+G40 “Sagittarii”|Garage|None|Refined Materials|20|||1|||
+GA6 “Cestus”|Small Assembly Station|Motor Pool|Construction Materials|30|Assembly Materials II|20|1|||600
+Gallagher Brigand Mk. I|Garage|None|Refined Materials|150|||1|||
+Gallagher Highwayman Mk. III|Small Assembly Station|Tank Factory|Processed Construction Materials|5|Assembly Materials II|10|1|||420
+Gallagher Outlaw Mk. II|Small Assembly Station|Tank Factory|Processed Construction Materials|10|Assembly Materials I|10|1|||420
+Gallagher Thornfall Mk. VI|Small Assembly Station|Weapons Platform|Processed Construction Materials|60|Assembly Materials I|10|1|||600
+Gas Mask|Factory|Utility|Basic Materials|160|||1|||100
+Gas Mask Filter|Factory|Utility|Basic Materials|100|||1|||50
+Gentleman's Peacoat|Factory|Uniforms|Basic Materials|100|||1|||90
+Gentleman's Peacoat|Infantry Kit Factory|None|Construction Materials|110|||10|||8100
+Gravel|Concrete Mixer|None|Coal|100|||20|||40
+Gravel|Refinery|None|Coal|5|||1|||1.2
+Green Ash Grenade|Factory|Small Arms|Basic Materials|140|||1|||100
+Grenadier's Baldric|Factory|Uniforms|Basic Materials|100|||1|||90
+Grenadier's Baldric|Infantry Kit Factory|None|Construction Materials|110|||10|||8100
+Gunner's Breastplate|Factory|Uniforms|Basic Materials|150|||1|||90
+Gunner's Breastplate|Infantry Kit Factory|None|Construction Materials|220|||10|||8100
+H-10 “Pelekys”|Small Assembly Station|Tank Factory|Processed Construction Materials|8|Assembly Materials II|20|1|||300
+H-19 “Vulcan”|Small Assembly Station|Tank Factory|Processed Construction Materials|8|Assembly Materials II|20|1|||300
+H-5 “Hatchet”|Garage|None|Refined Materials|115|||1|||
+H-8 “Kranesca”|Small Assembly Station|Tank Factory|Processed Construction Materials|5|Assembly Materials I|20|1|||300
+Havoc Charge|Factory|Utility|Basic Materials|75|Heavy Explosive Powder|40|1|||60
+Havoc Charge Detonator|Factory|Utility|Basic Materials|75|Heavy Explosive Powder|20|1|||60
+HC-2 “Scorpion”|Garage|None|Refined Materials|100|||1|||
+HC-7 “Ballista”|Small Assembly Station|Tank Factory|Processed Construction Materials|15|Assembly Materials II|15|1|||180
+Heavy Explosive Powder|Refinery|None|Sulfur|5|||1|||15
+Heavy Oil|Offshore Platform|None|||||1|||50
+Heavy Oil|Oil Refinery|Cracking Unit|Oil|50|||30|||55
+Heavy Topcoat|Factory|Uniforms|Basic Materials|100|||1|||90
+Heavy Topcoat|Infantry Kit Factory|None|Construction Materials|110|||10|||8100
+HH-a “Javelin”|Garage|None|Refined Materials|55|||1|||
+HH-b “Hoplite”|Small Assembly Station|Battery Line|Processed Construction Materials|3|Assembly Materials IV|3|1|||300
+HH-d “Peltast”|Small Assembly Station|Battery Line|Processed Construction Materials|5|Assembly Materials II|5|1|||300
+Huber Exalt 150mm|Construction Yard|None|Refined Materials|175|||1|||
+Huber Lariat 120mm|Construction Yard|None|Refined Materials|35|||1|||
+Huber Starbreaker 94.5mm|Small Assembly Station|Tank Factory|Processed Construction Materials|135|Assembly Materials I|10|1|||600
+Hydra's Whisper|Factory|Utility|Basic Materials|100|Explosive Powder|80|1|||100
+Ignifist 30|Factory|Heavy Arms|Basic Materials|85|Explosive Powder|70|1|||75
+Ignifist 30|Infantry Kit Factory|Small Arms Workshop|Explosive Powder|385|Construction Materials|95|10|||6900
+Incendiary Mortar Shell|Infantry Kit Factory|Special-Issue Firearms Assembly|Construction Materials|5|Flame Ammo|1|1|||75
+Intelligence Center Parts|Small Assembly Station|Advanced Structure Manufactory|Processed Construction Materials|50|Rare Alloys|3|1|||1500
+Interceptor PA-12|Base Ship|None|Basic Materials|10|||1|||
+Iron Alloy|Refinery|None|Iron|1|||1|||0.24
+K-81e “Sombre”|Shipyard|None|Basic Materials|200|||1|||100
+King Gallant Mk. II|Small Assembly Station|Field Station|Processed Construction Materials|5|Assembly Materials III|5|1|||300
+King Jester Mk. I-1|Small Assembly Station|Battery Line|Steel Construction Materials|5|Assembly Materials I|15|1|||600
+King Spire Mk. I|Garage|None|Refined Materials|70|||1|||
+Kivela Power Wheel 80-1|Garage|None|Basic Materials|85|||1|||
+KLG901-2 Lunaire F|Factory|Heavy Arms|Basic Materials|50|Refined Materials|15|1|||100
+KRF1-750 Dragonfly|Factory|Small Arms|Basic Materials|130|||1|||150
+KRN886-127 Gast Machine Gun|Factory|Small Arms|Refined Materials|25|||1|||100
+KRR2-790 Omen|Factory|Small Arms|Basic Materials|155|||1|||90
+KRR3-792 Auger|Factory|Small Arms|Basic Materials|250|Refined Materials|30|1|||250
+Lamentum mm.IV|Ammunition Factory|Tripod Factory|Construction Materials|3|||1|||25
+Lamentum mm.IV|Factory|Heavy Arms|Basic Materials|100|Refined Materials|5|1|||125
+Lance-25 “Hasta”|Large Assembly Station|Heavy Tank Assembly|Steel Construction Materials|60|Assembly Materials III|65|1|||86400
+Lance-36|Large Assembly Station|Heavy Tank Assembly|Steel Construction Materials|50|Assembly Materials III|30|1|||64800
+Lance-46 “Sarissa”|Large Assembly Station|Heavy Tank Assembly|Steel Construction Materials|150|Assembly Materials III|65|1|||86400
+Leary AA-70 Bolas|Construction Yard|None|Refined Materials|175|||1|||
+Leary AA-70 Bolas|Small Assembly Station|Battery Line|Processed Construction Materials|30|Assembly Materials I|10|1|||600
+Leary Shellbore 68mm|Construction Yard|None|Basic Materials|150|||1|||
+Leary Snare Trap 20|Construction Yard|None|Basic Materials|100|||1|||
+Legion Vexillum|Ammunition Factory|Tripod Factory|Construction Materials|1|Assembly Materials I|1|1|||25
+Legionary's Oilcoat|Factory|Uniforms|Basic Materials|100|||1|||90
+Legionary's Oilcoat|Infantry Kit Factory|None|Construction Materials|110|||10|||8100
+Liaison Transmitter|Factory|Utility|Basic Materials|75|||1|||50
+Liquid Container|Construction Yard|None|Basic Materials|100|||1|||
+Listening Kit|Factory|Utility|Basic Materials|150|||1|||60
+Lodesman's Lorica|Infantry Kit Factory|Special-Issue Firearms Assembly|Rare Materials|1|||1|||120
+Luminary Mk. II Harbinger|Large Assembly Station|Aircraft Assembly|Processed Construction Materials|40|Assembly Materials I|200|1|||14400
+Luminary Mk. IV Herald|Aircraft Hangar|None|Refined Materials|80|||1|||
+M925 Austringer Man-O-War|Large Assembly Station|Aircraft Assembly|Processed Construction Materials|25|Assembly Materials I|85|1|||14400
+MacConmara Shorerunner|Base Ship|None|Basic Materials|10|||1|||
+Maintenance Supplies|Factory|Resources|Basic Materials|250|||1|||125
+Maintenance Supplies|Materials Factory|None|Salvage|150|||20|||40
+Malone MK.2|Factory|Small Arms|Refined Materials|25|||1|||100
+Malone Ratcatcher MK.1|Ammunition Factory|Tripod Factory|Construction Materials|3|||1|||25
+Malone Ratcatcher MK.1|Factory|Heavy Arms|Basic Materials|100|Refined Materials|5|1|||125
+Mammon 91-b|Factory|Heavy Arms|Basic Materials|100|Explosive Powder|20|1|||80
+Mark II Raidbreaker|Ammunition Factory|Large Shell Factory|Heavy Explosive Powder|16|Processed Construction Materials|1|1|||120
+Material Pallet|Construction Yard|None|Basic Materials|25|||1|||
+Material Pallet|Small Assembly Station|None|Basic Materials|25|||1|||15
+Medic Fatigues|Factory|Uniforms|Basic Materials|100|||1|||90
+Medic Fatigues|Infantry Kit Factory|None|Construction Materials|110|||10|||8100
+Mercy|Dry Dock|None|Naval Hull Segments|16|Naval Shell Plating|20|1|||36000
+Mergo-4 “Myrmidon”|Large Assembly Station|Aircraft Assembly|Processed Construction Materials|40|Assembly Materials I|85|1|||14400
+Metal Beam|Factory|Utility|Basic Materials|25|||1|||20
+Metal Beam|Materials Factory|Assembly Bay|Salvage|25|||1|Construction Materials|1|25
+Model-7 “Evie”|Ammunition Factory|Large Shell Factory|Construction Materials|2|Heavy Explosive Powder|8|1|||25
+Moray Torpedo|Ammunition Factory|Large Shell Factory|Processed Construction Materials|2|Heavy Explosive Powder|16|1|||240
+Mortar Shell|Factory|Heavy Arms|Basic Materials|60|Explosive Powder|70|1|||100
+Mortar Shell|Infantry Kit Factory|Small Arms Workshop|Explosive Powder|385|Construction Materials|65|10|||9000
+Mounted Bonesaw MK.3|Ammunition Factory|Tripod Factory|Construction Materials|3|||1|||25
+Mounted Bonesaw MK.3|Factory|Heavy Arms|Basic Materials|100|Refined Materials|5|1|||250
+Mounted Fissura gd.I|Ammunition Factory|Tripod Factory|Construction Materials|3|||1|||25
+Mounted Fissura gd.I|Factory|Heavy Arms|Basic Materials|100|Refined Materials|5|1|||125
+Mulloy LPC|Garage|None|Refined Materials|20|||1|||
+Nakki|Dry Dock|None|Naval Hull Segments|15|Naval Shell Plating|15|1|||21600
+Naval Hull Segments|Small Assembly Station|Naval Works|Processed Construction Materials|60|Assembly Materials I|2|1|||1500
+Naval Shell Plating|Small Assembly Station|Naval Works|Construction Materials|2|Thermal Shielding|1|1|||300
+Naval Turbine Components|Small Assembly Station|Naval Works|Assembly Materials V|20|Rare Alloys|20|1|||43200
+Neville Anti-Tank Rifle|Factory|Heavy Arms|Basic Materials|150|||1|||37
+Niska Mk. I Gun Motor Carriage|Garage|None|Refined Materials|60|||1|||
+Niska Mk. II Blinder|Small Assembly Station|Battery Line|Processed Construction Materials|5|Assembly Materials II|10|1|||300
+Niska Mk. III Scar Twin|Small Assembly Station|Battery Line|Processed Construction Materials|5|Assembly Materials IV|5|1|||300
+Niska-Rycker Mk. IX Skycaller|Small Assembly Station|Battery Line|Processed Construction Materials|10|Assembly Materials I|10|1|||300
+No.1 “The Liar” Submachine Gun|Factory|Small Arms|Basic Materials|120|||1|||80
+No.2 Loughcaster|Factory|Small Arms|Basic Materials|100|||1|||70
+No.2B Hawthorne|Factory|Small Arms|Basic Materials|70|||1|||60
+No.4 The Pillory Scattergun|Factory|Small Arms|Basic Materials|80|||1|||100
+Noble Firebrand Mk. XVII|Small Assembly Station|Tank Factory|Processed Construction Materials|10|Assembly Materials II|10|1|||420
+Noble Widow MK. XIV|Garage|None|Refined Materials|160|||1|||
+O-75b “Ares”|Large Assembly Station|Heavy Tank Assembly|Steel Construction Materials|275|Assembly Materials III|105|1|||172800
+O'Brien V.101 Freeman|Small Assembly Station|Motor Pool|Construction Materials|15|Assembly Materials I|15|1|||300
+O'Brien V.110|Garage|None|Refined Materials|25|||1|||
+O'Brien V.113 Gravekeeper|Small Assembly Station|Motor Pool|Processed Construction Materials|10|Assembly Materials I|10|1|||300
+O'Brien V.121 Highlander|Small Assembly Station|Motor Pool|Construction Materials|5|Assembly Materials I|5|1|||300
+O'Brien V.130 Wild Jack|Small Assembly Station|Motor Pool|Construction Materials|10|Assembly Materials I|10|1|||300
+O'Brien V.190 Knave|Garage|None|Refined Materials|40|||1|||
+O'Brien V.200 Squire|Small Assembly Station|Battery Line|Processed Construction Materials|35|Assembly Materials I|10|1|||300
+O'Brien Warsmith v.215|Large Assembly Station|Train Assembly|Steel Construction Materials|30|Assembly Materials I|30|1|||1800
+Officer's Regalia|Factory|Uniforms|Basic Materials|100|||1|||90
+Officer's Regalia|Infantry Kit Factory|None|Construction Materials|110|||10|||8100
+Officialis' Attire|Factory|Uniforms|Basic Materials|100|||1|||90
+Officialis' Attire|Infantry Kit Factory|None|Construction Materials|110|||10|||8100
+Oil|Oil Well|Electric Oil Well|||||50|||26
+Oil|Oil Well|Fracker|Water|25|||100|||40
+Oil|Oil Well|None|||||50|||50
+Outrider's Mantle|Factory|Uniforms|Basic Materials|100|||1|||90
+Outrider's Mantle|Infantry Kit Factory|None|Construction Materials|110|||10|||8100
+Padded Boiler Suit|Factory|Uniforms|Basic Materials|100|||1|||90
+Padded Boiler Suit|Infantry Kit Factory|None|Construction Materials|110|||10|||8100
+Paratrooper's Ruck|Infantry Kit Factory|Special-Issue Firearms Assembly|Construction Materials|20|||1|||60
+Petrol|Oil Refinery|None|Oil|50|||50|||50
+Petrol|Oil Refinery|Reformer|Oil|40|Water|10|50|||50
+Physician's Jacket|Factory|Uniforms|Basic Materials|100|||1|||90
+Physician's Jacket|Infantry Kit Factory|None|Construction Materials|110|||10|||8100
+Pipe|Metalworks Factory|None|Processed Construction Materials|3|||1|||120
+PL-1 “Phalanx”|Garage|None|Relic Materials|2400|||1|||600
+Poseidon|Dry Dock|None|Naval Hull Segments|16|Naval Shell Plating|20|1|||36000
+Processed Construction Materials|Metalworks Factory|Blast Furnace|Construction Materials|3|Components|55|3|||60
+Processed Construction Materials|Metalworks Factory|None|Construction Materials|3|Components|20|1|||60
+Processed Construction Materials|Metalworks Factory|Recycler|Construction Materials|15|Metal Beam|1|1|||90
+PT-815 Smoke Grenade|Factory|Small Arms|Basic Materials|80|||1|||75
+PT-815 Smoke Grenade|Infantry Kit Factory|Small Arms Workshop|Construction Materials|135|||10|||6900
+Quillback Torpedo|Ammunition Factory|None|Construction Materials|12|||1|||25
+Quillback Torpedo|Factory|Heavy Arms|Basic Materials|125|Explosive Powder|75|1|||125
+R-1 Hauler|Garage|None|Basic Materials|100|||1|||
+R-12 - “Salus” Ambulance|Garage|None|Basic Materials|150|||1|||
+R-12b - “Salva” Flame Truck|Small Assembly Station|None|Construction Materials|15|Assembly Materials II|5|1|||300
+R-15 - “Chariot”|Garage|None|Basic Materials|100|||1|||
+R-17 “Retiarius” Skirmisher|Small Assembly Station|Battery Line|Processed Construction Materials|70|Assembly Materials I|10|1|||300
+R-5 “Atlas” Hauler|Garage|None|Basic Materials|120|||1|||
+R-5b “Sisyphus” Hauler|Small Assembly Station|None|Construction Materials|10|||1|||300
+R-9 “Speartip” Escort|Small Assembly Station|None|Construction Materials|10|||1|||300
+Radio|Factory|Utility|Basic Materials|75|||1|||50
+Radio Backpack|Factory|Utility|Basic Materials|150|||1|||75
+Rare Alloys|Metalworks Factory|Blast Furnace|Rare Metal|20|Processed Construction Materials|5|1|||180
+Rare Materials|Metalworks Factory|Blast Furnace|Rare Metal|1|Construction Materials|5|1|||180
+Recon Camo|Factory|Uniforms|Basic Materials|100|||1|||90
+Recon Camo|Infantry Kit Factory|None|Construction Materials|110|||10|||8100
+Refined Materials|Refinery|None|Components|20|||1|||40
+Remex Garb|Factory|Uniforms|Basic Materials|100|||1|||90
+Remex Garb|Infantry Kit Factory|None|Construction Materials|110|||10|||8100
+Repurposed Truck|Garage|None|Relic Materials|60|||1|||
+Reserve Power|Engine Room|None|Diesel|0.5|||1|||144
+Reserve Power|Engine Room|None|Petrol|0.5|||1|||144
+Reserve Power|Engine Room|Power Line Connection|||||1|||144
+Resource Container|Construction Yard|None|Basic Materials|50|||1|||
+Rinnspeir Mk. I Zealot|Large Assembly Station|Aircraft Assembly|Steel Construction Materials|5|Assembly Materials III|20|1|||21600
+Rinnspeir Ornitier-Class Gunship|Shipyard|None|Basic Materials|450|||1|||90
+Rooster - Junkwagon|Garage|None|Refined Materials|10|||1|||
+Rooster - Lamploader|Small Assembly Station|Field Station|Processed Construction Materials|10|Assembly Materials II|5|1|||300
+Rooster - Tumblebox|Small Assembly Station|Field Station|Processed Construction Materials|10|Assembly Materials II|5|1|||300
+RPG|Factory|Heavy Arms|Basic Materials|60|Explosive Powder|90|1|||100
+RPG|Infantry Kit Factory|Heavy Munitions Foundry|Construction Materials|65|Explosive Powder|495|10|||9000
+RR-3 “Stolon” Tanker|Garage|None|Basic Materials|100|||1|||
+Rycker 4/3-F Wasp Nest|Small Assembly Station|Battery Line|Processed Construction Materials|20|Assembly Materials II|15|1|||600
+Salvage|Salvage Mine|None|Diesel|1|||9|||8
+Salvage|Salvage Mine|None|Petrol|1|||27|||8
+Salvage|Stationary Harvester (Salvage)|Excavator|Petrol|6|||15|||18
+Salvage|Stationary Harvester (Salvage)|None|Petrol|4|||50|||18
+Sampo Auto-Rifle 77|Factory|Small Arms|Basic Materials|125|||1|||70
+Sandbag|Factory|Utility|Basic Materials|15|||1|||15
+Sandbag|Materials Factory|Assembly Bay|Salvage|25|||5|Construction Materials|1|25
+Sapper Gear|Factory|Uniforms|Basic Materials|100|||1|||90
+Sapper Gear|Infantry Kit Factory|None|Construction Materials|110|||10|||8100
+Shatter Missile|Ammunition Factory|Rocket Battery Workshop|Construction Materials|15|Heavy Explosive Powder|28|1|||25
+Shatter Missile|Factory|Heavy Ammunition|Basic Materials|250|Heavy Explosive Powder|250|1|||250
+Shipping Container|Construction Yard|None|Basic Materials|100|||1|||
+Shovel|Factory|Utility|Basic Materials|200|||1|||100
+Shrapnel Mortar Shell|Factory|Heavy Arms|Basic Materials|60|Explosive Powder|20|1|||100
+Shrapnel Mortar Shell|Infantry Kit Factory|Small Arms Workshop|Explosive Powder|110|Construction Materials|65|10|||9000
+Silverhand - Mk. IV|Garage|None|Refined Materials|155|||1|||
+Silverhand Chieftain - Mk. VI|Small Assembly Station|Tank Factory|Processed Construction Materials|5|Assembly Materials I|10|1|||420
+Silverhand Lordscar - Mk. X|Small Assembly Station|Weapons Platform|Steel Construction Materials|40|Assembly Materials II|25|1|||600
+Sledge Hammer|Factory|Utility|Basic Materials|200|||1|||100
+Soldier Supplies|BMS Bloodtender|None|Critically Wounded Soldier|1|||10|||600
+Soldier Supplies|Factory|Medical|Basic Materials|80|||1|||80
+Soldier Supplies|Field Hospital|None|Critically Wounded Soldier|1|||3|||600
+Soldier Supplies|Hospital|None|Critically Wounded Soldier|1|||10|||600
+Soldier Supplies|Medical Room|None|Critically Wounded Soldier|1|||4|||600
+Specialist's Overcoat|Factory|Uniforms|Basic Materials|100|||1|||90
+Specialist's Overcoat|Infantry Kit Factory|None|Construction Materials|110|||10|||8100
+Staff Car|Garage|None|Relic Materials|60|||1|||
+Steel Construction Materials|Metalworks Factory|Engineering Station|Processed Construction Materials|3|Coke|200|1|||90
+Steel Construction Materials|Metalworks Factory|Engineering Station|Processed Construction Materials|9|Coke|375|3|||90
+Storm Cannon Parts|Small Assembly Station|Advanced Structure Manufactory|Processed Construction Materials|300|Rare Alloys|20|1|||1500
+Storm Tank|Garage|None|Relic Materials|240|||1|||120
+Strider|Shipyard|None|Basic Materials|500|||1|||100
+Structure Parts|Small Assembly Station|Advanced Structure Manufactory|Processed Construction Materials|50|Assembly Materials IV|40|1|||300
+Sulfur|Stationary Harvester (Sulfur)|Excavator|Heavy Oil|6|||2|Coal|5|18
+Sulfur|Stationary Harvester (Sulfur)|None|Heavy Oil|4|||6|||12
+Sulfur|Sulfur Mine|None|Diesel|1|||9|||30
+Sulfur|Sulfur Mine|None|Petrol|1|||27|||30
+Swallowtail 988/127-2|Garage|None|Refined Materials|20|||1|||
+T12 “Actaeon” Tankette|Garage|None|Refined Materials|35|||1|||
+T13 “Deioneus” Rocket Battery|Small Assembly Station|Battery Line|Processed Construction Materials|20|Assembly Materials I|15|1|||600
+T14 “Vesta” Tankette|Small Assembly Station|Motor Pool|Processed Construction Materials|10|Assembly Materials I|15|1|||600
+T20 “Ixion” Tankette|Small Assembly Station|Motor Pool|Construction Materials|10|Assembly Materials I|15|1|||300
+T3 “Xiphos”|Garage|None|Refined Materials|25|||1|||
+T5 “Percutio”|Small Assembly Station|Motor Pool|Construction Materials|10|Assembly Materials I|10|1|||300
+T8 “Gemini”|Small Assembly Station|Motor Pool|Construction Materials|10|Assembly Materials I|10|1|||300
+Tankman's Coveralls|Factory|Uniforms|Basic Materials|100|||1|||90
+Tankman's Coveralls|Infantry Kit Factory|None|Construction Materials|110|||10|||8100
+Tempest Cannon RA-2|Large Assembly Station|Train Assembly|Steel Construction Materials|285|Assembly Materials III|95|1|||259200
+The Hangman 757|Factory|Small Arms|Basic Materials|125|||1|||80
+The Ospreay|Factory|Utility|Basic Materials|85|Refined Materials|10|1|||100
+Thermal Shielding|Ammunition Factory|None|Construction Materials|2|Assembly Materials IV|5|1|||1500
+Titan|Dry Dock|None|Naval Hull Segments|20|Naval Shell Plating|20|1|||36000
+Toxot-902 “Blind Silver”|Large Assembly Station|Aircraft Assembly|Processed Construction Materials|40|Assembly Materials I|200|1|||14400
+Trauma Kit|Factory|Medical|Basic Materials|80|||1|||50
+Tremola Grenade GPb-1|Factory|Heavy Arms|Basic Materials|75|Explosive Powder|100|1|||80
+Tremola Grenade GPb-1|Infantry Kit Factory|Heavy Munitions Foundry|Construction Materials|80|Explosive Powder|550|10|||7200
+Tripod|Ammunition Factory|Tripod Factory|Construction Materials|2|||1|||25
+Tripod|Factory|Utility|Basic Materials|100|||1|||60
+Tulka I1.9 White Raven|Large Assembly Station|Aircraft Assembly|Processed Construction Materials|40|||1|||14400
+Tulka P4 Welkinrive|Large Assembly Station|Aircraft Assembly|Steel Construction Materials|60|Assembly Materials III|25|1|||28800
+Type B - “Lucian”|Shipyard|None|Refined Materials|100|||1|||
+Type C - “Charon”|Shipyard|None|Refined Materials|140|||1|||
+Underground Fortress Parts|Small Assembly Station|Advanced Structure Manufactory|Processed Construction Materials|200|Rare Alloys|5|1|||1500
+Unstable Substances|Ammunition Factory|Rocket Battery Workshop|Flame Ammo|3|Heavy Explosive Powder|8|1|||1800
+UV-05a “Argonaut”|Garage|None|Refined Materials|10|||1|||
+UV-24 “Icarus”|Small Assembly Station|Motor Pool|Construction Materials|3|Assembly Materials II|10|1|||180
+UV-5c “Odyssey”|Small Assembly Station|Motor Pool|Construction Materials|3|||1|||180
+V-1 Tzykalia|Large Assembly Station|Aircraft Assembly|Steel Construction Materials|60|Assembly Materials III|25|1|||28800
+V-5b Pegasus|Large Assembly Station|Aircraft Assembly|Steel Construction Materials|5|Assembly Materials III|20|1|||21600
+Velian Flak Vest|Factory|Uniforms|Basic Materials|200|||1|||90
+Velian Flak Vest|Infantry Kit Factory|None|Construction Materials|220|||10|||8100
+Venom c.II 35|Factory|Heavy Arms|Basic Materials|100|Refined Materials|15|1|||50
+Volta r.I Repeater|Factory|Small Arms|Basic Materials|100|||1|||90
+War Ensign|Ammunition Factory|Tripod Factory|Construction Materials|1|Assembly Materials I|1|1|||25
+Warden Aircraft Engine (Large)|Aircraft Maintenance Factory|Strategic Maintenance Hangar|Processed Construction Materials|5|Assembly Materials IV|5|1|||300
+Warden Aircraft Engine (Large)|Aircraft Maintenance Factory|Strategic Maintenance Hangar|Processed Construction Materials|95|Assembly Materials IV|25|1|||1200
+Warden Aircraft Engine (Small)|Aircraft Maintenance Factory|None|Processed Construction Materials|1|Assembly Materials IV|1|1|||300
+Warden Aircraft Engine (Small)|Aircraft Maintenance Factory|None|Processed Construction Materials|95|Assembly Materials IV|25|1|||1200
+Warden Aircraft Mechanical Parts (Large)|Aircraft Maintenance Factory|Strategic Maintenance Hangar|Processed Construction Materials|5|Assembly Materials III|5|1|||300
+Warden Aircraft Mechanical Parts (Large)|Aircraft Maintenance Factory|Strategic Maintenance Hangar|Processed Construction Materials|35|Assembly Materials III|25|1|||1200
+Warden Aircraft Mechanical Parts (Small)|Aircraft Maintenance Factory|None|Processed Construction Materials|1|Assembly Materials III|1|1|||300
+Warden Aircraft Mechanical Parts (Small)|Aircraft Maintenance Factory|None|Processed Construction Materials|35|Assembly Materials III|25|1|||1200
+Water|Water Pump|None|||||50|||50
+Water Bucket|Factory|Utility|Basic Materials|80|||1|||40
+Weather Station Parts|Small Assembly Station|Advanced Structure Manufactory|Processed Construction Materials|150|Assembly Materials I|150|1|||1500
+Willow's Bane Ammo|Factory|Utility|Basic Materials|135|Heavy Explosive Powder|20|1|||100
+Willow's Bane Model 845|Factory|Heavy Arms|Basic Materials|165|Refined Materials|30|1|||50
+Wind Sock|Factory|Utility|Basic Materials|150|||1|||60
+Wrench|Factory|Utility|Basic Materials|75|||1|||50`;
+
+// Parses the raw table text into objects the React app can read
+const parseDatabase = (csvText) => {
+  const lines = csvText.trim().split('\n');
+  const dbMap = {};
+  
+  for (let i = 1; i < lines.length; i++) {
+    const line = lines[i].trim();
+    if (!line) continue;
+    
+    const parts = line.split('|');
+    if (parts.length < 8) continue;
+    
+    const name = parts[0].trim();
+    const facility = parts[1].trim();
+    
+    let recipe = "Gathered / Automatic";
+    const in1 = parts[3]?.trim();
+    const in1Amt = parts[4]?.trim();
+    const in2 = parts[5]?.trim();
+    const in2Amt = parts[6]?.trim();
+    const outAmt = parts[7]?.trim();
+
+    if (in1 && in1Amt) {
+      recipe = `${in1Amt}x ${in1}`;
+      if (in2 && in2Amt) {
+        recipe += `, ${in2Amt}x ${in2}`;
+      }
+    }
+    
+    if (outAmt && outAmt !== '1') {
+      recipe += ` (Yields ${outAmt})`;
+    }
+    
+    if (!dbMap[name]) {
+      dbMap[name] = { name, methods: [] };
+    }
+    
+    const isDuplicate = dbMap[name].methods.some(m => m.facility === facility && m.recipe === recipe);
+    if (!isDuplicate) {
+      dbMap[name].methods.push({ facility, recipe });
+    }
+  }
+  
+  return Object.values(dbMap).sort((a, b) => a.name.localeCompare(b.name));
+};
+
+const RECIPE_DB = parseDatabase(RAW_WIKI_DATA);
+
+const App = () => {
+  const [user, setUser] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [activeTab, setActiveTab] = useState('facilities');
+  const [showSettings, setShowSettings] = useState(false);
+  
+  const [facilities, setFacilities] = useState([]);
+  const [mines, setMines] = useState([]);
+  const [players, setPlayers] = useState([]);
+  
+  const [craftSearch, setCraftSearch] = useState('');
+  const [craftSelected, setCraftSelected] = useState(null);
+  const [isCraftFocused, setIsCraftFocused] = useState(false);
+  
+  const [saveStatus, setSaveStatus] = useState('idle');
+
+  const [migrationCode, setMigrationCode] = useState('');
+  const [settingsMsg, setSettingsMsg] = useState({ text: '', type: '' });
+  const textAreaRef = useRef(null);
+
+  useEffect(() => {
+    const initAuth = async () => {
+      try {
+        if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+          await signInWithCustomToken(auth, __initial_auth_token);
+        } else {
+          await signInAnonymously(auth);
+        }
+      } catch (error) {
+        console.error("Auth error:", error);
+      }
+    };
+    initAuth();
+    const unsubscribe = onAuthStateChanged(auth, setUser);
+    return () => unsubscribe();
+  }, []);
+
+  useEffect(() => {
+    if (!user) return;
+    const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'sheets', 'master_ledger');
+    const unsubscribe = onSnapshot(docRef, (docSnap) => {
+      if (docSnap.exists()) {
+        const data = docSnap.data();
+        if (Array.isArray(data.facilities)) setFacilities(data.facilities);
+        if (Array.isArray(data.mines)) setMines(data.mines);
+        if (Array.isArray(data.players)) setPlayers(data.players);
+      } else {
+        setFacilities([{ id: 'f-init', coords: '', material: '', facility: '', player: '' }]);
+        setMines([{ id: 'm-init', coords: '', type: '', fuel: '' }]);
+        setPlayers([{ id: 'p-init', name: '', status: '' }]);
+      }
+      setLoading(false);
+    }, (error) => {
+      setSaveStatus('error');
+      setLoading(false);
+    });
+    return () => unsubscribe();
+  }, [user]);
+
+  const persistData = async (payload) => {
+    if (!user) return;
+    setSaveStatus('saving');
+    try {
+      const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'sheets', 'master_ledger');
+      await setDoc(docRef, payload, { merge: true });
+      setSaveStatus('saved');
+      setTimeout(() => setSaveStatus('idle'), 2000);
+    } catch (error) {
+      setSaveStatus('error');
+    }
+  };
+
+  const handleAddEntry = () => {
+    const id = Date.now().toString();
+    if (activeTab === 'facilities') {
+      const newList = [...facilities, { id, coords: '', material: '', facility: '', player: '' }];
+      setFacilities(newList);
+      persistData({ facilities: newList });
+    } else if (activeTab === 'mines') {
+      const newList = [...mines, { id, coords: '', type: '', fuel: '' }];
+      setMines(newList);
+      persistData({ mines: newList });
+    } else if (activeTab === 'players') {
+      const newList = [...players, { id, name: '', status: '' }];
+      setPlayers(newList);
+      persistData({ players: newList });
+    }
+  };
+
+  const handleDeleteEntry = (id) => {
+    if (activeTab === 'facilities') {
+      const newList = facilities.filter(f => f.id !== id);
+      setFacilities(newList);
+      persistData({ facilities: newList });
+    } else if (activeTab === 'mines') {
+      const newList = mines.filter(m => m.id !== id);
+      setMines(newList);
+      persistData({ mines: newList });
+    } else if (activeTab === 'players') {
+      const newList = players.filter(p => p.id !== id);
+      setPlayers(newList);
+      persistData({ players: newList });
+    }
+  };
+
+  const handleUpdateFacility = (id, field, value) => {
+    const newRows = facilities.map(row => {
+      if (row.id === id) {
+        const updated = { ...row, [field]: value };
+        if (field === 'material') {
+          const valid = MATERIAL_TO_FACILITY_MAP[value] || [];
+          if (valid.length > 0 && !valid.includes(row.facility)) updated.facility = valid[0];
+        }
+        return updated;
+      }
+      return row;
+    });
+    setFacilities(newRows);
+    persistData({ facilities: newRows });
+  };
+
+  const handleUpdateMine = (id, field, value) => {
+    const newRows = mines.map(row => row.id === id ? { ...row, [field]: value } : row);
+    setMines(newRows);
+    persistData({ mines: newRows });
+  };
+
+  const handleUpdatePlayer = (id, field, value) => {
+    const newRows = players.map(row => row.id === id ? { ...row, [field]: value } : row);
+    setPlayers(newRows);
+    persistData({ players: newRows });
+  };
+
+  const generateBackup = () => {
+    const data = JSON.stringify({ facilities, mines, players });
+    setMigrationCode(data);
+    const textArea = document.createElement("textarea");
+    textArea.value = data;
+    document.body.appendChild(textArea);
+    textArea.select();
+    try {
+      document.execCommand('copy');
+      setSettingsMsg({ text: 'Backup code copied!', type: 'success' });
+    } catch (err) {
+      setSettingsMsg({ text: 'Select text and copy manually.', type: 'warning' });
+    }
+    document.body.removeChild(textArea);
+    setTimeout(() => setSettingsMsg({ text: '', type: '' }), 4000);
+  };
+
+  const importBackup = () => {
+    try {
+      if (!migrationCode) return;
+      const data = JSON.parse(migrationCode);
+      const newFac = data.facilities || [];
+      const newMines = data.mines || [];
+      const newPlayers = data.players || [];
+      setFacilities(newFac);
+      setMines(newMines);
+      setPlayers(newPlayers);
+      persistData({ facilities: newFac, mines: newMines, players: newPlayers });
+      setSettingsMsg({ text: 'Data restored!', type: 'success' });
+      setMigrationCode('');
+    } catch (e) {
+      setSettingsMsg({ text: 'Invalid code.', type: 'error' });
+    }
+    setTimeout(() => setSettingsMsg({ text: '', type: '' }), 4000);
+  };
+
+  if (loading) {
+    return (
+      <div className="flex flex-col items-center justify-center h-screen bg-slate-950 text-blue-500">
+        <Loader2 className="w-12 h-12 animate-spin mb-4" />
+        <p className="text-sm font-black tracking-[0.3em] uppercase opacity-50">Connecting to Grid</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="min-h-screen bg-slate-950 text-slate-200 font-sans p-4 md:p-8 selection:bg-blue-500/30 relative">
+      <header className="max-w-6xl mx-auto mb-8 flex flex-col md:flex-row md:items-center justify-between gap-4">
+        <div className="flex items-center gap-4">
+          <div className="bg-blue-600 p-2.5 rounded-xl shadow-lg shadow-blue-900/20">
+            <Layout className="text-white" size={24} />
+          </div>
+          <div>
+            <h1 className="text-2xl font-black text-white tracking-tight uppercase italic">Foxhole Logistics Terminal</h1>
+            <div className="flex items-center gap-2 mt-0.5">
+              <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
+              <p className="text-[10px] text-slate-500 uppercase tracking-widest font-bold">Secure Local Repository v4.4</p>
+            </div>
+          </div>
+        </div>
+        
+        <div className="flex items-center gap-2">
+          <a 
+            href="https://foxhole.wiki.gg/" 
+            target="_blank" 
+            rel="noopener noreferrer"
+            className="flex items-center gap-2 px-4 py-2 bg-slate-900 border border-slate-800 rounded-xl text-slate-400 hover:text-white hover:bg-slate-800 transition-all shadow-md text-xs font-bold uppercase tracking-widest"
+          >
+            <BookOpen size={16} className="text-blue-500" /> Wiki
+          </a>
+          <div className={`flex items-center gap-3 px-4 py-2 rounded-xl border transition-all ${
+            saveStatus === 'saved' ? 'bg-emerald-900/10 border-emerald-500/20 text-emerald-400' : 
+            saveStatus === 'saving' ? 'bg-blue-900/10 border-blue-500/20 text-blue-400' : 
+            saveStatus === 'error' ? 'bg-red-900/10 border-red-500/20 text-red-400' : 'bg-slate-900/50 border-slate-800 text-slate-500'
+          }`}>
+            {saveStatus === 'saving' ? <Loader2 className="w-4 h-4 animate-spin" /> : <Database size={16} />}
+            <span className="text-[10px] font-black tracking-widest uppercase">
+              {saveStatus === 'saving' ? 'Uplink' : saveStatus === 'saved' ? 'Synced' : 'Error'}
+            </span>
+          </div>
+          <button 
+            onClick={() => setShowSettings(!showSettings)}
+            className="p-2.5 bg-slate-900 border border-slate-800 rounded-xl text-slate-400 hover:text-white hover:bg-slate-800 transition-all shadow-md"
+          >
+            <Settings size={20} />
+          </button>
+        </div>
+      </header>
+
+      {showSettings && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-lg overflow-hidden shadow-2xl flex flex-col">
+            <div className="p-5 border-b border-slate-800 flex justify-between items-center bg-slate-800/50">
+              <h2 className="text-base font-bold flex items-center gap-2 uppercase tracking-widest text-white">
+                <Database size={18} className="text-blue-500" /> Data Migration
+              </h2>
+              <button onClick={() => setShowSettings(false)} className="text-slate-400 hover:text-white"><X size={20} /></button>
+            </div>
+            <div className="p-6 space-y-6">
+              <p className="text-xs text-slate-400 leading-relaxed">Paste backup code from your old app to move data between versions.</p>
+              {settingsMsg.text && (
+                <div className={`p-3 rounded-lg text-xs font-bold uppercase tracking-widest border ${
+                  settingsMsg.type === 'success' ? 'bg-emerald-900/30 text-emerald-400 border-emerald-500/30' :
+                  settingsMsg.type === 'error' ? 'bg-red-900/30 text-red-400 border-red-500/30' :
+                  'bg-amber-900/30 text-amber-400 border-amber-500/30'
+                }`}>{settingsMsg.text}</div>
+              )}
+              <div className="space-y-3">
+                <textarea
+                  ref={textAreaRef}
+                  value={migrationCode}
+                  onChange={(e) => setMigrationCode(e.target.value)}
+                  placeholder="Paste code here..."
+                  className="w-full h-32 bg-slate-950 border border-slate-700 rounded-xl p-3 text-slate-300 font-mono text-xs focus:ring-2 focus:ring-blue-500 outline-none resize-none"
+                />
+                <div className="flex gap-3">
+                  <button onClick={generateBackup} className="flex-1 bg-slate-800 hover:bg-slate-700 text-white py-2.5 rounded-xl text-xs font-bold uppercase tracking-widest transition-colors">Copy Code</button>
+                  <button onClick={importBackup} className="flex-1 bg-blue-600 hover:bg-blue-500 text-white py-2.5 rounded-xl text-xs font-bold uppercase tracking-widest transition-colors shadow-lg">Import Code</button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <main className="max-w-6xl mx-auto">
+        <div className="flex gap-2 mb-6 bg-slate-900/40 p-1 rounded-2xl border border-slate-800/50 w-fit backdrop-blur-md overflow-x-auto no-scrollbar">
+          <button onClick={() => setActiveTab('facilities')} className={`px-6 py-3 rounded-xl text-[10px] font-black tracking-widest transition-all flex items-center gap-2 flex-shrink-0 ${activeTab === 'facilities' ? 'bg-blue-600 text-white shadow-xl' : 'text-slate-500 hover:text-slate-200'}`}><Factory size={14} /> FACILITIES</button>
+          <button onClick={() => setActiveTab('mines')} className={`px-6 py-3 rounded-xl text-[10px] font-black tracking-widest transition-all flex items-center gap-2 flex-shrink-0 ${activeTab === 'mines' ? 'bg-amber-600 text-white shadow-xl' : 'text-slate-500 hover:text-slate-200'}`}><Pickaxe size={14} /> RESOURCES</button>
+          <button onClick={() => setActiveTab('crafting')} className={`px-6 py-3 rounded-xl text-[10px] font-black tracking-widest transition-all flex items-center gap-2 flex-shrink-0 ${activeTab === 'crafting' ? 'bg-purple-600 text-white shadow-xl' : 'text-slate-500 hover:text-slate-200'}`}><Hammer size={14} /> CRAFT HELPER</button>
+          <button onClick={() => setActiveTab('players')} className={`px-6 py-3 rounded-xl text-[10px] font-black tracking-widest transition-all flex items-center gap-2 flex-shrink-0 ${activeTab === 'players' ? 'bg-red-600 text-white shadow-xl' : 'text-slate-500 hover:text-slate-200'}`}><Shield size={14} /> FRIENDS & FOES</button>
+        </div>
+
+        <div className="bg-slate-900/80 rounded-3xl border border-slate-800 shadow-2xl overflow-visible backdrop-blur-xl pb-10 min-h-[400px] flex flex-col">
+          {activeTab === 'crafting' ? (
+            <div className="p-8 max-w-3xl mx-auto flex flex-col w-full flex-1">
+              <div className="relative z-40">
+                <div className="relative">
+                  <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={20} />
+                  <input
+                    type="text"
+                    placeholder="Search weapon, vehicle, resource..."
+                    value={craftSearch}
+                    onChange={(e) => {
+                      setCraftSearch(e.target.value);
+                      if (!e.target.value) setCraftSelected(null);
+                    }}
+                    onFocus={() => setIsCraftFocused(true)}
+                    onBlur={() => setTimeout(() => setIsCraftFocused(false), 200)}
+                    className="w-full pl-12 bg-slate-950/80 border-2 border-slate-700 focus:border-purple-500 rounded-2xl px-6 py-4 text-slate-200 text-lg outline-none transition-colors"
+                  />
+                </div>
+                {isCraftFocused && craftSearch && !craftSelected && (
+                  <div className="absolute left-0 right-0 top-full mt-2 bg-slate-800 border border-slate-700 rounded-xl shadow-2xl overflow-hidden max-h-64 overflow-y-auto">
+                    {RECIPE_DB.filter(r => r.name.toLowerCase().includes(craftSearch.toLowerCase().trim())).length > 0 ? (
+                      RECIPE_DB.filter(r => r.name.toLowerCase().includes(craftSearch.toLowerCase().trim())).map((item, idx) => (
+                        <button key={idx} onMouseDown={() => { setCraftSelected(item); setCraftSearch(item.name); }} className="w-full text-left px-6 py-3 text-sm text-slate-200 hover:bg-purple-600/30 border-b border-slate-700/50 last:border-0 transition-colors flex justify-between items-center">
+                          <span className="font-bold">{item.name}</span>
+                          <span className="text-[10px] uppercase font-bold tracking-widest text-purple-400 bg-purple-900/30 px-2 py-1 rounded-md">{item.methods.length} Method{item.methods.length !== 1 ? 's' : ''}</span>
+                        </button>
+                      ))
+                    ) : (
+                      <div className="px-6 py-4 text-sm text-slate-400 italic text-center">No recipes found matching "{craftSearch}".</div>
+                    )}
+                  </div>
+                )}
+              </div>
+              {craftSelected && (
+                <div className="mt-8 bg-slate-900 border border-purple-500/30 rounded-2xl p-6 shadow-xl relative overflow-hidden">
+                  <h2 className="text-2xl font-black text-white mb-6 relative z-10">{craftSelected.name}</h2>
+                  <div className="flex flex-col gap-3 relative z-10 max-h-[300px] overflow-y-auto pr-2 custom-scrollbar">
+                    {craftSelected.methods.map((method, idx) => (
+                      <div key={idx} className="bg-slate-950/80 p-4 rounded-xl border border-slate-800 grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                          <div className="flex items-center gap-2 text-slate-500 text-[10px] font-black uppercase tracking-widest mb-1"><Factory size={12} className="text-blue-400" /> Produced At</div>
+                          <p className="text-slate-200 font-medium text-sm">{method.facility}</p>
+                        </div>
+                        <div>
+                          <div className="flex items-center gap-2 text-slate-500 text-[10px] font-black uppercase tracking-widest mb-1"><Package size={12} className="text-amber-400" /> Recipe</div>
+                          <p className="text-amber-200/90 font-medium text-sm">{method.recipe}</p>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                  <button onClick={() => { setCraftSearch(''); setCraftSelected(null); }} className="mt-6 text-xs text-purple-400 hover:text-purple-300 font-bold uppercase tracking-widest flex items-center gap-1 relative z-10"><X size={14} /> Clear Lookup</button>
+                </div>
+              )}
+              <div className="mt-auto pt-16 flex justify-center">
+                <div className="bg-purple-900/10 border border-purple-500/20 rounded-lg p-2 flex items-center gap-2 opacity-50">
+                  <FileText size={12} className="text-purple-400" />
+                  <p className="text-[9px] text-slate-400 uppercase tracking-widest">Custom DB Loaded: {RECIPE_DB.length} Items</p>
+                </div>
+              </div>
+            </div>
+          ) : (
+            <>
+              <div className="overflow-x-auto overflow-y-visible">
+                <table className="w-full text-left border-collapse">
+                  <thead>
+                    <tr className="bg-slate-800/30 border-b border-slate-800">
+                      {activeTab === 'facilities' ? (
+                        <>
+                          <th className="px-6 py-5 text-[10px] font-black text-slate-500 uppercase tracking-widest w-40">Player</th>
+                          <th className="px-6 py-5 text-[10px] font-black text-slate-500 uppercase tracking-widest w-40">Coords</th>
+                          <th className="px-6 py-5 text-[10px] font-black text-slate-500 uppercase tracking-widest w-64">Material</th>
+                          <th className="px-6 py-5 text-[10px] font-black text-slate-500 uppercase tracking-widest">Facility</th>
+                        </>
+                      ) : activeTab === 'mines' ? (
+                        <>
+                          <th className="px-6 py-5 text-[10px] font-black text-slate-500 uppercase tracking-widest w-96">Coords</th>
+                          <th className="px-6 py-5 text-[10px] font-black text-slate-500 uppercase tracking-widest w-64">Mine Type</th>
+                          <th className="px-6 py-5 text-[10px] font-black text-slate-500 uppercase tracking-widest">Fuel</th>
+                        </>
+                      ) : (
+                        <>
+                          <th className="px-6 py-5 text-[10px] font-black text-slate-500 uppercase tracking-widest w-full">Player Name</th>
+                          <th className="px-6 py-5 text-[10px] font-black text-slate-500 uppercase tracking-widest w-48">Status</th>
+                        </>
+                      )}
+                      <th className="px-6 py-5 w-20"></th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-800/50">
+                    {activeTab === 'facilities' && facilities.map((row) => (
+                      <tr key={row.id} className="hover:bg-blue-500/5 transition-colors group">
+                        <td className="px-4 py-3"><select value={row.player || ''} onChange={(e) => handleUpdateFacility(row.id, 'player', e.target.value)} className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2 text-slate-200 text-xs outline-none"><option value="">Operator...</option>{PLAYER_OPTIONS.map(o => <option key={o} value={o}>{o}</option>)}</select></td>
+                        <td className="px-4 py-3 font-mono text-xs"><input type="text" placeholder="F7-4" value={row.coords || ''} onChange={(e) => handleUpdateFacility(row.id, 'coords', e.target.value)} className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2 text-slate-200 outline-none" /></td>
+                        <td className="px-4 py-3"><select value={row.material || ''} onChange={(e) => handleUpdateFacility(row.id, 'material', e.target.value)} className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2 text-slate-200 text-xs outline-none"><option value="">Product...</option>{MATERIAL_OPTIONS.map(o => <option key={o} value={o}>{o}</option>)}</select></td>
+                        <td className="px-4 py-3"><select value={row.facility || ''} onChange={(e) => handleUpdateFacility(row.id, 'facility', e.target.value)} className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2 text-slate-200 text-xs outline-none"><option value="">Station...</option>{FACILITY_OPTIONS.filter(f => !row.material || MATERIAL_TO_FACILITY_MAP[row.material]?.includes(f)).map(o => <option key={o} value={o}>{o}</option>)}</select></td>
+                        <td className="px-4 py-3 text-center"><button onClick={() => handleDeleteEntry(row.id)} className="p-2 text-slate-600 hover:text-red-500 opacity-0 group-hover:opacity-100"><Trash2 size={16} /></button></td>
+                      </tr>
+                    ))}
+                    {activeTab === 'mines' && mines.map((row) => (
+                      <tr key={row.id} className="hover:bg-amber-500/5 transition-colors group">
+                        <td className="px-4 py-3 font-mono text-xs"><input type="text" placeholder="L12-2" value={row.coords || ''} onChange={(e) => handleUpdateMine(row.id, 'coords', e.target.value)} className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2 text-slate-200 outline-none" /></td>
+                        <td className="px-4 py-3"><select value={row.type || ''} onChange={(e) => handleUpdateMine(row.id, 'type', e.target.value)} className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2 text-slate-200 text-xs outline-none"><option value="">Resource...</option>{MINE_TYPES.map(o => <option key={o} value={o}>{o}</option>)}</select></td>
+                        <td className="px-4 py-3"><select value={row.fuel || ''} onChange={(e) => handleUpdateMine(row.id, 'fuel', e.target.value)} className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2 text-slate-200 text-xs outline-none"><option value="">Fuel...</option>{FUEL_OPTIONS.map(o => <option key={o} value={o}>{o}</option>)}</select></td>
+                        <td className="px-4 py-3 text-center"><button onClick={() => handleDeleteEntry(row.id)} className="p-2 text-slate-600 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-all"><Trash2 size={16} /></button></td>
+                      </tr>
+                    ))}
+                    {activeTab === 'players' && players.map((row) => (
+                      <tr key={row.id} className="hover:bg-red-500/5 transition-colors group">
+                        <td className="px-4 py-3 font-mono text-xs"><input type="text" placeholder="Enter name..." value={row.name || ''} onChange={(e) => handleUpdatePlayer(row.id, 'name', e.target.value)} className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2 text-slate-200 outline-none" /></td>
+                        <td className="px-4 py-3"><select value={row.status || ''} onChange={(e) => handleUpdatePlayer(row.id, 'status', e.target.value)} className={`w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2 text-xs outline-none cursor-pointer appearance-none font-bold uppercase ${row.status === 'Friend' ? 'text-emerald-400' : row.status === 'Foe' ? 'text-amber-400' : row.status === 'KOS' ? 'text-red-500' : 'text-slate-200'}`}><option value="">Status...</option><option value="Friend">Friend</option><option value="Foe">Foe</option><option value="KOS">KOS</option></select></td>
+                        <td className="px-4 py-3 text-center"><button onClick={() => handleDeleteEntry(row.id)} className="p-2 text-slate-600 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-all"><Trash2 size={16} /></button></td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <div className="p-6 bg-slate-800/20 border-t border-slate-800 flex justify-between items-center mt-auto">
+                <button onClick={handleAddEntry} className={`flex items-center gap-2 px-8 py-3 rounded-2xl font-black text-[10px] tracking-widest text-white shadow-xl transition-all active:scale-95 border-b-4 ${activeTab === 'facilities' ? 'bg-blue-600 border-blue-800' : activeTab === 'mines' ? 'bg-amber-600 border-amber-800' : 'bg-red-600 border-red-800'}`}>{saveStatus === 'saving' ? <Loader2 size={18} className="animate-spin" /> : <Plus size={18} strokeWidth={3} />}{saveStatus === 'saving' ? 'SYNCING...' : 'ADD ENTRY'}</button>
+                <p className="text-[9px] text-slate-600 font-mono uppercase tracking-[0.2em] italic hidden sm:block">Logistics Integrity Verified</p>
+              </div>
+            </>
+          )}
+        </div>
+      </main>
+
+      <footer className="max-w-6xl mx-auto mt-12 pb-12 flex flex-col md:flex-row justify-between items-center gap-4 text-slate-700 text-[10px] font-bold uppercase tracking-[0.3em]">
+        <div className="flex items-center gap-3">
+          <div className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse" />
+          TERMINAL ID: {appId.substring(0,8)}...
+        </div>
+        <p>© FOXHOLE COMMUNITY GRID | VER 4.4.1</p>
+      </footer>
+    </div>
+  );
+};
+
+export default App;
